@@ -2,7 +2,9 @@ import {Component, OnInit} from '@angular/core';
 import {FormBuilder, FormGroup, Validators} from "@angular/forms";
 import {HttpClient} from "@angular/common/http";
 import {saveAs} from 'file-saver/FileSaver';
-const WS_SERVER = 'http://ec2-54-194-1-197.eu-west-1.compute.amazonaws.com:3000/api/';
+import {LambdaClientService} from "../services/lambdaClientService";
+
+const WS_SERVER = "https://mz20iyigvg.execute-api.eu-west-1.amazonaws.com/devmax/";
 @Component({
   selector: 'app-upload',
   templateUrl: './upload.component.html',
@@ -15,7 +17,7 @@ export class UploadComponent implements OnInit {
   ngOnInit() {
   }
 
-  constructor(private fb: FormBuilder,private http: HttpClient) {
+  constructor(private fb: FormBuilder,private http: HttpClient, private lambdaClientService: LambdaClientService) {
     this.createForm();
   }
   createForm() {
@@ -36,31 +38,36 @@ export class UploadComponent implements OnInit {
     }
   }
 
-  private prepareSave(): any {
-    let input = new FormData();
-    input.append('secretKey', this.form.get('secretKey').value);
-    input.append('algorithm', this.form.get('algorithm').value);
-    input.append('file', this.form.get('file').value );
-    return input;
+  async onSubmit() {
+    const body = this.generatePayload();
+    let res = await this.processFile(body);
+    saveAs(res.blob,res.filename);
   }
 
-  onSubmit() {
-    const formModel = this.prepareSave();
+  private async processFile(body: { file: any; operation: any; algorithm: any; secretKey: any }) {
     const operation = this.form.get('operation').value;
-    this.http.post(`${WS_SERVER}${operation}`, formModel,{responseType: "blob"})
-      .subscribe(res => {
-        let fileBlob = res;
-        let filename = '';
-        if(operation === "encrypt") {
-          filename = `${this.form.get('file').value.name}.encrypt`;
-        }
-        else {
-          let split = this.form.get('file').value.name.split('.');
-          split.pop();
-          filename = split.join('.');
-        }
-        saveAs(fileBlob,filename);
-        console.log(this.form.get('file').value);
-      })
+    let res;
+    if (operation === 'encrypt') {
+      res = await this.lambdaClientService.encrypt(body)
+    } else {
+      res = await this.lambdaClientService.decrypt(body);
+      res.filename = this.getOriginalFilename();
+    }
+    return res;
+  }
+
+  private getOriginalFilename() {
+    let newFilename = this.form.get('file').value.name.split('.');
+    newFilename.pop();
+    return newFilename.join('.');
+  }
+
+  private generatePayload() {
+    return {
+      file: this.form.get('file').value,
+      operation: this.form.get('operation').value,
+      algorithm: this.form.get('algorithm').value,
+      secretKey: this.form.get('secretKey').value
+    };
   }
 }
